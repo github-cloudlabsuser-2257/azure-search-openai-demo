@@ -1,3 +1,8 @@
+"""
+This module contains the implementation of the `Approach` class and related helper classes.
+The `Approach` class is an abstract base class that defines the common interface and behavior for different approaches used in the application.
+"""
+
 import os
 from abc import ABC
 from dataclasses import dataclass
@@ -30,6 +35,24 @@ from text import nonewlines
 
 @dataclass
 class Document:
+    """
+    Represents a document returned from the search results.
+
+    Attributes:
+        id (Optional[str]): The ID of the document.
+        content (Optional[str]): The content of the document.
+        embedding (Optional[List[float]]): The vector embedding of the document.
+        image_embedding (Optional[List[float]]): The vector embedding of the document's image.
+        category (Optional[str]): The category of the document.
+        sourcepage (Optional[str]): The source page of the document.
+        sourcefile (Optional[str]): The source file of the document.
+        oids (Optional[List[str]]): The object IDs associated with the document.
+        groups (Optional[List[str]]): The groups associated with the document.
+        captions (List[QueryCaptionResult]): The captions associated with the document.
+        score (Optional[float]): The search score of the document.
+        reranker_score (Optional[float]): The reranker score of the document.
+    """
+
     id: Optional[str]
     content: Optional[str]
     embedding: Optional[List[float]]
@@ -44,6 +67,12 @@ class Document:
     reranker_score: Optional[float] = None
 
     def serialize_for_results(self) -> dict[str, Any]:
+        """
+        Serializes the document object into a dictionary format suitable for returning in the search results.
+
+        Returns:
+            dict[str, Any]: The serialized document.
+        """
         return {
             "id": self.id,
             "content": self.content,
@@ -72,10 +101,18 @@ class Document:
 
     @classmethod
     def trim_embedding(cls, embedding: Optional[List[float]]) -> Optional[str]:
-        """Returns a trimmed list of floats from the vector embedding."""
+        """
+        Returns a trimmed list of floats from the vector embedding.
+
+        Args:
+            embedding (Optional[List[float]]): The vector embedding.
+
+        Returns:
+            Optional[str]: The trimmed embedding as a string.
+        """
         if embedding:
             if len(embedding) > 2:
-                # Format the embedding list to show the first 2 items followed by the count of the remaining items."""
+                # Format the embedding list to show the first 2 items followed by the count of the remaining items.
                 return f"[{embedding[0]}, {embedding[1]} ...+{len(embedding) - 2} more]"
             else:
                 return str(embedding)
@@ -85,12 +122,38 @@ class Document:
 
 @dataclass
 class ThoughtStep:
+    """
+    Represents a step in a thought process.
+
+    Attributes:
+        title (str): The title of the thought step.
+        description (Optional[Any]): The description of the thought step.
+        props (Optional[dict[str, Any]]): Additional properties of the thought step.
+    """
+
     title: str
     description: Optional[Any]
     props: Optional[dict[str, Any]] = None
 
 
 class Approach(ABC):
+    """
+    Abstract base class for different approaches used in the application.
+
+    Attributes:
+        search_client (SearchClient): The Azure Search client.
+        openai_client (AsyncOpenAI): The OpenAI client.
+        auth_helper (AuthenticationHelper): The authentication helper.
+        query_language (Optional[str]): The query language.
+        query_speller (Optional[str]): The query speller.
+        embedding_deployment (Optional[str]): The deployment name for the embedding model.
+        embedding_model (str): The name of the embedding model.
+        embedding_dimensions (int): The number of dimensions in the embedding vector.
+        openai_host (str): The OpenAI host.
+        vision_endpoint (str): The endpoint for the vision service.
+        vision_token_provider (Callable[[], Awaitable[str]]): The token provider for the vision service.
+    """
+
     def __init__(
         self,
         search_client: SearchClient,
@@ -98,7 +161,7 @@ class Approach(ABC):
         auth_helper: AuthenticationHelper,
         query_language: Optional[str],
         query_speller: Optional[str],
-        embedding_deployment: Optional[str],  # Not needed for non-Azure OpenAI or for retrieval_mode="text"
+        embedding_deployment: Optional[str],
         embedding_model: str,
         embedding_dimensions: int,
         openai_host: str,
@@ -118,6 +181,16 @@ class Approach(ABC):
         self.vision_token_provider = vision_token_provider
 
     def build_filter(self, overrides: dict[str, Any], auth_claims: dict[str, Any]) -> Optional[str]:
+        """
+        Builds the filter expression based on the provided overrides and authentication claims.
+
+        Args:
+            overrides (dict[str, Any]): The filter overrides.
+            auth_claims (dict[str, Any]): The authentication claims.
+
+        Returns:
+            Optional[str]: The filter expression.
+        """
         exclude_category = overrides.get("exclude_category")
         security_filter = self.auth_helper.build_security_filters(overrides, auth_claims)
         filters = []
@@ -138,6 +211,22 @@ class Approach(ABC):
         minimum_search_score: Optional[float],
         minimum_reranker_score: Optional[float],
     ) -> List[Document]:
+        """
+        Performs a search query and returns the qualified documents.
+
+        Args:
+            top (int): The maximum number of documents to return.
+            query_text (Optional[str]): The search query text.
+            filter (Optional[str]): The filter expression.
+            vectors (List[VectorQuery]): The vector queries.
+            use_semantic_ranker (bool): Whether to use the semantic ranker.
+            use_semantic_captions (bool): Whether to use semantic captions.
+            minimum_search_score (Optional[float]): The minimum search score for qualifying documents.
+            minimum_reranker_score (Optional[float]): The minimum reranker score for qualifying documents.
+
+        Returns:
+            List[Document]: The qualified documents.
+        """
         # Use semantic ranker if requested and if retrieval mode is text or hybrid (vectors + text)
         if use_semantic_ranker and query_text:
             results = await self.search_client.search(
@@ -190,6 +279,17 @@ class Approach(ABC):
     def get_sources_content(
         self, results: List[Document], use_semantic_captions: bool, use_image_citation: bool
     ) -> list[str]:
+        """
+        Retrieves the content of the sources for the given search results.
+
+        Args:
+            results (List[Document]): The search results.
+            use_semantic_captions (bool): Whether to use semantic captions.
+            use_image_citation (bool): Whether to use image citation.
+
+        Returns:
+            list[str]: The content of the sources.
+        """
         if use_semantic_captions:
             return [
                 (self.get_citation((doc.sourcepage or ""), use_image_citation))
@@ -204,6 +304,16 @@ class Approach(ABC):
             ]
 
     def get_citation(self, sourcepage: str, use_image_citation: bool) -> str:
+        """
+        Retrieves the citation for the given source page.
+
+        Args:
+            sourcepage (str): The source page.
+            use_image_citation (bool): Whether to use image citation.
+
+        Returns:
+            str: The citation.
+        """
         if use_image_citation:
             return sourcepage
         else:
@@ -216,6 +326,15 @@ class Approach(ABC):
             return sourcepage
 
     async def compute_text_embedding(self, q: str):
+        """
+        Computes the vector embedding for the given text query.
+
+        Args:
+            q (str): The text query.
+
+        Returns:
+            VectorizedQuery: The vectorized query.
+        """
         SUPPORTED_DIMENSIONS_MODEL = {
             "text-embedding-ada-002": False,
             "text-embedding-3-small": True,
@@ -238,6 +357,15 @@ class Approach(ABC):
         return VectorizedQuery(vector=query_vector, k_nearest_neighbors=50, fields="embedding")
 
     async def compute_image_embedding(self, q: str):
+        """
+        Computes the vector embedding for the given image query.
+
+        Args:
+            q (str): The image query.
+
+        Returns:
+            VectorizedQuery: The vectorized query.
+        """
         endpoint = urljoin(self.vision_endpoint, "computervision/retrieval:vectorizeText")
         headers = {"Content-Type": "application/json"}
         params = {"api-version": "2023-02-01-preview", "modelVersion": "latest"}
@@ -254,6 +382,34 @@ class Approach(ABC):
         return VectorizedQuery(vector=image_query_vector, k_nearest_neighbors=50, fields="imageEmbedding")
 
     async def run(
+        self,
+        top: int,
+        query_text: Optional[str],
+        filter: Optional[str],
+        vectors: List[VectorQuery],
+        use_semantic_ranker: bool,
+        use_semantic_captions: bool,
+        minimum_search_score: Optional[float],
+        minimum_reranker_score: Optional[float],
+    ) -> List[Document]:
+        """
+        Runs the approach with the given parameters and returns the qualified documents.
+
+        Args:
+            top (int): The maximum number of documents to return.
+            query_text (Optional[str]): The search query text.
+            filter (Optional[str]): The filter expression.
+            vectors (List[VectorQuery]): The vector queries.
+            use_semantic_ranker (bool): Whether to use the semantic ranker.
+            use_semantic_captions (bool): Whether to use semantic captions.
+            minimum_search_score (Optional[float]): The minimum search score for qualifying documents.
+            minimum_reranker_score (Optional[float]): The minimum reranker score for qualifying documents.
+
+        Returns:
+            List[Document]: The qualified documents.
+        """
+        # Implementation specific to each approach
+        pass
         self, messages: list[dict], stream: bool = False, session_state: Any = None, context: dict[str, Any] = {}
     ) -> Union[dict[str, Any], AsyncGenerator[dict[str, Any], None]]:
         raise NotImplementedError
